@@ -1,0 +1,60 @@
+{
+  "name": "dsh-skill-easy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "把 / 菜单里的技能按自定义分类分段，并用中文显示描述",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/menu.test.mjs test/store.test.mjs",
+    "check": "node --check index.js && node --check store.js && node --check client.js && npm test"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "store.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "meta": {
+      "title": "技能分类 · Skill Easy",
+      "description": "给技能分类、写中文描述，让 / 菜单一眼能看懂"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-ui-skill"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-home-paths": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    }
+  }
+}

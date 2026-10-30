@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Skill Easy">
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#2f6df6"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 22h9"/>
+    <path d="M18 32h9"/>
+    <path d="M18 42h9"/>
+    <path d="M34 22h12"/>
+    <path d="M34 32h12"/>
+    <path d="M34 42h12"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="15" cy="22" r="2.6"/>
+    <circle cx="15" cy="32" r="2.6"/>
+    <circle cx="15" cy="42" r="2.6"/>
+  </g>
+</svg>

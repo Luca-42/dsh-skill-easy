@@ -1,0 +1,4 @@
+# dsh-skill-easy：宿主服务行，客户端模块由 dsh.client 声明
+- insert:
+    - id: dsh-skill-easy
+      name: 'dsh-skill-easy'
