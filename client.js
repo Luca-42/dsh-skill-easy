@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     const NS = 'skill-easy'
     const SECTION_ID = 'dsh-skill-easy'
     /** 客户端版本号：和宿主的 CODE_VERSION 一起显示，用来确认页面跑的是哪一版。 */
-    const CLIENT_VERSION = 14
+    const CLIENT_VERSION = 15
 
     /* ───────────────────────── 文案 ───────────────────────── */
 
@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
       menuOffHint: '设置照常可用，只是 / 菜单不会分组。',
       translatorOff: '翻译服务不可用',
       translatorHint: '仍可手动填写中文描述。',
+      translatorBuiltin: '翻译走内置 bing（宿主未挂载 translator 服务）',
       userOnly: '仅用户',
       stale: '原文已变',
       emptySkills: '没有发现技能。',
@@ -97,6 +98,7 @@ window.__ModuleLoader__.load({
       menuOffHint: 'Settings still work; the / menu just stays ungrouped.',
       translatorOff: 'Translation unavailable',
       translatorHint: 'You can still type Chinese descriptions by hand.',
+      translatorBuiltin: 'Translating via built-in Bing (host translator service not mounted)',
       userOnly: 'user-only',
       stale: 'source changed',
       emptySkills: 'No skills found.',
@@ -806,6 +808,11 @@ window.__ModuleLoader__.load({
       }
 
       const translatorOff = snapshot.translator !== null && snapshot.translator.available === false
+      // 宿主没挂 translator 服务时，宿主半边会走内置 bing 兜底：翻译照常可用，
+      // 只是要让人知道描述发出去了，所以在标题旁标一句，而不是弹「不可用」。
+      const translatorBuiltin = snapshot.translator !== null
+        && snapshot.translator.available !== false
+        && snapshot.translator.mode === 'builtin'
 
       /**
        * 当前生效的主题（light / dark）。
@@ -921,7 +928,11 @@ window.__ModuleLoader__.load({
       const skillSection = h('section', { className: 'ske-section' },
         h('div', { className: 'ske-sectionHead' },
           h('h3', { className: 'ske-sectionTitle' }, t('skills'), h('span', { className: 'ske-count' }, String(snapshot.skills.length))),
-          translatorOff ? h('span', { className: 'ske-note' }, `${t('translatorOff')} · ${t('translatorHint')}`) : null,
+          translatorOff
+            ? h('span', { className: 'ske-note' }, `${t('translatorOff')} · ${t('translatorHint')}`)
+            : translatorBuiltin
+              ? h('span', { className: 'ske-note' }, t('translatorBuiltin'))
+              : null,
         ),
         snapshot.skills.length === 0
           ? h('div', null,

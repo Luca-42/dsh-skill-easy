@@ -16,13 +16,14 @@ import { dirname, join } from 'node:path'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DocumentStore, emptyDocument, hashOf, text, MAX_ZH } from './store.js'
+import { FALLBACK_PROVIDER, translateDirect } from './fallback.js'
 
 /** 翻译目标语言；translator 内部会把 zh-CN 归一成各 provider 的写法。 */
 const TARGET_LANGUAGE = 'zh-CN'
 /** 翻译并发：provider 是公开机器翻译接口，压太高容易被限流。 */
 const TRANSLATE_CONCURRENCY = 3
 /** 代码版本号：界面上会显示，用来确认跑的是哪一版。 */
-const CODE_VERSION = 9
+const CODE_VERSION = 10
 
 /** 按固定并发跑完一组任务，单项失败不影响其他项。 */
 async function mapLimit(items, limit, worker) {
@@ -193,19 +194,48 @@ export default class SkillEasyService extends TypertRemoteService {
     return result
   }
 
-  /** 翻译服务状态：不可用时客户端只提供手动填写，不报错。 */
+  /**
+   * 翻译能力：宿主服务可用就报服务，不可用就报内置兜底。
+   *
+   * 原实现只区分「服务缺失（translator-unavailable）」和「服务里没有 provider」，
+   * 而默认 profile 恰好两者都不满足，界面只能显示「翻译服务不可用」，用户无处下手。
+   * 现在服务缺失不算不可用——内置 bing 兜底（fallback.js）照常能翻，
+   * 这里只交代走的是哪条路，`hint` 用来说明为什么没走宿主服务。
+   * @returns `{ available, mode, providers, reason, hint? }`。
+   */
   async translatorState() {
     const translator = this.service('translator')
-    if (translator === undefined) return { available: false, reason: 'translator-unavailable', providers: [] }
+    if (translator === undefined) {
+      return this.builtinTranslatorState('translator-unavailable', '宿主未挂载 translator 服务')
+    }
     try {
       const providers = await translator.availableProviders()
       const names = (Array.isArray(providers) ? providers : []).map((entry) => {
         if (typeof entry === 'string') return entry
         return String(entry?.provider ?? entry?.id ?? entry?.name ?? '')
       })
-      return { available: names.length > 0, reason: names.length > 0 ? null : 'no-provider', providers: names }
+      if (names.length === 0) {
+        return this.builtinTranslatorState('no-provider', '宿主 translator 服务没有可用 provider')
+      }
+      return { available: true, mode: 'service', providers: names, reason: null }
     } catch (error) {
-      return { available: false, reason: error?.message ?? 'translator-error', providers: [] }
+      return this.builtinTranslatorState(error?.message ?? 'translator-error', '读取宿主 translator 服务失败')
+    }
+  }
+
+  /**
+   * 内置 bing 兜底的状态描述。
+   * @param reason - 没走宿主服务的原因（code 或错误信息）。
+   * @param summary - 给人看的原因摘要。
+   * @returns 与 `translatorState()` 同构的状态。
+   */
+  builtinTranslatorState(reason, summary) {
+    return {
+      available: true,
+      mode: 'builtin',
+      providers: [FALLBACK_PROVIDER],
+      reason,
+      hint: `${summary}，已改用内置 ${FALLBACK_PROVIDER} 直连（技能描述会发送到 edge.microsoft.com）`,
     }
   }
 
@@ -257,22 +287,31 @@ export default class SkillEasyService extends TypertRemoteService {
       ? request.names.filter((name) => byName.has(name))
       : catalog.map((skill) => skill.name)
     const translator = this.service('translator')
-    if (translator === undefined) {
-      return { results: [], failures: wanted.map((name) => ({ name, reason: 'translator-unavailable' })), translator: { available: false, reason: 'translator-unavailable', providers: [] } }
-    }
 
+    // 每条独立翻译：宁可单条失败，也不要整批因为服务缺失而全灭。
+    // 顺序是「宿主服务（有的话）→ 内置 bing」，两条路都失败才合并原因记一条 failure。
     const outcomes = await mapLimit(wanted, TRANSLATE_CONCURRENCY, async (name) => {
       const skill = byName.get(name)
       const description = String(skill?.description ?? '').trim()
       if (description === '') return { name, reason: 'empty-description' }
+      const srcHash = hashOf(description)
+      let serviceReason
+      if (translator !== undefined) {
+        try {
+          const zh = await this.translateWithService(translator, description)
+          return { name, zh, srcHash }
+        } catch (error) {
+          serviceReason = String(error?.code ?? error?.message ?? 'translate-failed')
+        }
+      }
       try {
-        const spec = translator.resolve({ text: description, targetLanguage: TARGET_LANGUAGE, sourceLanguage: 'en' })
-        const translated = await translator.translate(spec)
+        const translated = await translateDirect(description, { targetLanguage: TARGET_LANGUAGE })
         const zh = text(String(translated ?? '').replace(/\s+/g, ' ').trim(), MAX_ZH)
         if (zh === '') return { name, reason: 'empty-translation' }
-        return { name, zh, srcHash: hashOf(description) }
+        return { name, zh, srcHash }
       } catch (error) {
-        return { name, reason: error?.code ?? error?.message ?? 'translate-failed' }
+        const fallbackReason = String(error?.code ?? error?.message ?? 'translate-failed')
+        return { name, reason: serviceReason === undefined ? fallbackReason : `${serviceReason} → ${fallbackReason}` }
       }
     })
 
@@ -297,6 +336,25 @@ export default class SkillEasyService extends TypertRemoteService {
     }
     const translatorState = await this.translatorState()
     return { results, failures, document: this.store.snapshot(), translator: translatorState }
+  }
+
+  /**
+   * 通过宿主 translator 服务翻一条。
+   * 语言归一、请求格式、错误码都由宿主服务负责，这里只做结果规范化。
+   * @param translator - 宿主 translator 服务。
+   * @param description - 英文描述。
+   * @returns 中文描述（非空）。
+   */
+  async translateWithService(translator, description) {
+    const spec = translator.resolve({ text: description, targetLanguage: TARGET_LANGUAGE, sourceLanguage: 'en' })
+    const translated = await translator.translate(spec)
+    const zh = text(String(translated ?? '').replace(/\s+/g, ' ').trim(), MAX_ZH)
+    if (zh === '') {
+      const error = new Error('empty-translation')
+      error.code = 'empty-translation'
+      throw error
+    }
+    return zh
   }
 
   /**
